@@ -1,0 +1,5 @@
+dist/
+build/
+*.spk
+/data/
+.DS_Store

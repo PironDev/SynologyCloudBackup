@@ -1,0 +1,74 @@
+name: ci
+
+# Исходники лежат в приватном сабмодуле app/ (PironDev/SynologyCloudBackup-src).
+# Для его загрузки нужен секрет SUBMODULE_TOKEN — fine-grained PAT с правом
+# Contents: Read-only только на репозиторий SynologyCloudBackup-src.
+#
+# Логи этого репозитория публичны. Поэтому вывод gofmt, vet и тестов пишется в файл,
+# а в лог попадает только итог. Подробности падения — в CI приватного репозитория.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # PR из форков не получают секретов — приватный сабмодуль им недоступен.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Проверка секрета SUBMODULE_TOKEN
+        working-directory: .
+        env:
+          SUBMODULE_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+        run: |
+          if [ -z "$SUBMODULE_TOKEN" ]; then
+            echo "::error::Не задан секрет SUBMODULE_TOKEN (PAT с доступом на чтение к PironDev/SynologyCloudBackup-src)"
+            exit 1
+          fi
+      # checkout сам переводит SSH-адрес сабмодуля (git@github.com:…) на HTTPS с этим токеном.
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULE_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: app/go.mod
+          cache-dependency-path: app/go.sum
+      - name: Формат, vet, тесты, скрипты (вывод скрыт)
+        run: |
+          quiet() {
+            if ! "$@" >"$RUNNER_TEMP/out.log" 2>&1; then
+              echo "::error::Не прошло: $1. Подробности — в CI приватного репозитория SynologyCloudBackup-src"
+              exit 1
+            fi
+          }
+          gofmt_clean() { test -z "$(gofmt -l .)"; }
+          quiet gofmt_clean
+          quiet go vet ./...
+          quiet go test -race ./...
+          quiet bash -n packaging/build.sh
+          for f in internal/web/static/*.js; do quiet node --check "$f"; done
+          quiet node --test internal/web/filestation.test.cjs
+          echo "Все проверки прошли"
+      - name: Сборка SPK без подписи (вывод скрыт)
+        run: packaging/build.sh 0.0.0-ci >"$RUNNER_TEMP/build.log" 2>&1 || { echo "::error::Сборка SPK не прошла"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spk-ci
+          path: app/dist/*.spk
+          if-no-files-found: error
+          retention-days: 7
