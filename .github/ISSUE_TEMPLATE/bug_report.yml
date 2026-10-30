@@ -1,0 +1,55 @@
+name: Сообщить об ошибке
+description: Опишите ошибку в CloudBackup.
+title: "Ошибка: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Не добавляйте пароли, токены, IP-адреса, имена пользователей и пути к личным файлам.
+  - type: input
+    id: version
+    attributes:
+      label: Версия CloudBackup
+      description: Укажите версию пакета.
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: dsm
+    attributes:
+      label: Версия DSM
+      description: Укажите версию DSM.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги для воспроизведения
+      description: Опишите действия по одному шагу в строке.
+      placeholder: |
+        1. Откройте...
+        2. Выберите...
+        3. Нажмите...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидаемый результат
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Фактический результат
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Сообщение об ошибке
+      description: Удалите секреты и личные данные перед отправкой.
+      render: text
+    validations:
+      required: false
