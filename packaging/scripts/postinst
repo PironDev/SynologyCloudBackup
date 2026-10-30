@@ -1,0 +1,6 @@
+#!/bin/sh
+# Каталог данных создаётся при установке; при обновлении настройки сохраняются.
+VAR="${SYNOPKG_PKGVAR:-/var/packages/@PKG@/var}"
+mkdir -p "$VAR/data" 2>/dev/null
+chmod 700 "$VAR/data" 2>/dev/null
+exit 0
