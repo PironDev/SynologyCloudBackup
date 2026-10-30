@@ -1,0 +1,67 @@
+name: release
+
+# Релиз создаётся при пуше тега vX.Y.Z: SPK собирается из того коммита приватного
+# сабмодуля app/, который зафиксирован в теге, подписывается и публикуется здесь,
+# в публичном репозитории (отсюда же пакет проверяет обновления).
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Проверка секрета SUBMODULE_TOKEN
+        working-directory: .
+        env:
+          SUBMODULE_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+        run: |
+          if [ -z "$SUBMODULE_TOKEN" ]; then
+            echo "::error::Не задан секрет SUBMODULE_TOKEN (PAT с доступом на чтение к PironDev/SynologyCloudBackup-src)"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULE_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: app/go.mod
+          cache-dependency-path: app/go.sum
+      - name: Тесты
+        run: go test -race ./...
+      - name: Ключ подписи во временный файл
+        env:
+          SIGN_KEY: ${{ secrets.UPDATE_SIGN_KEY }}
+        run: |
+          printf '%s\n' "$SIGN_KEY" >"$RUNNER_TEMP/sign.key"
+          chmod 600 "$RUNNER_TEMP/sign.key"
+          echo "UPDATE_SIGN_KEY=$RUNNER_TEMP/sign.key" >>"$GITHUB_ENV"
+      - name: Сборка и подпись
+        env:
+          UPDATE_REPO: ${{ github.repository }}
+          UPDATE_PUBKEY: ${{ vars.UPDATE_PUBKEY }}
+        run: packaging/build.sh "${GITHUB_REF_NAME#v}"
+      - name: Публикация релиза
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.spk dist/SHA256SUMS dist/SHA256SUMS.sig \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+      - name: Удалить ключ
+        if: always()
+        working-directory: .
+        run: rm -f "$RUNNER_TEMP/sign.key"
