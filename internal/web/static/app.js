@@ -356,6 +356,8 @@ async function viewOverview(el, again = false) {
   else el.classList.add('still'); // повторный запрос без повторной анимации появления
   const d = await api('GET', '/api/summary' + (forceSum ? '?refresh=1' : '')); forceSum = false;
   if (d.accounts.some(a => a.pending) && view === 'overview') setTimeout(() => { if (view === 'overview' && $('#view') && !document.querySelector('.overlay')) viewOverview($('#view'), true).catch(() => {}); }, 1500);
+  const up = await api('GET', '/api/update').catch(() => ({available: false}));
+  const banner = up.available ? `<a class="upd-banner" href="${esc(up.url)}" target="_blank" rel="noopener">${alertBox('info', 'Доступна версия ' + up.version, 'Скачать пакет можно на странице релиза. Установите его через Центр пакетов.')}</a>` : '';
   const t = d.totals, usedPct = t.total ? Math.round(t.used / t.total * 100) : 0;
   const tiles = `<div class="stats">${stat('Всего места', t.known ? fmtBytes(t.total) : '—', t.known ? `по ${t.known} из ${t.accounts} аккаунтов` : (d.accounts.some(a => a.pending) ? 'запрашиваю у облака…' : 'облако не сообщает объём'))}
     ${stat('Занято', t.known ? fmtBytes(t.used) : '—', t.known ? usedPct + '% от объёма' : '')}
@@ -371,7 +373,7 @@ async function viewOverview(el, again = false) {
       <div class="bar-v"><i class="${x.fail ? 'f' : ''}" style="height:${Math.max(x.bytes / max * 100, x.bytes ? 4 : 0).toFixed(1)}%"></i></div><span>${shortDate(x.date)}</span></div>`).join('')}</div>`;
   const vols = d.volumes.length ? d.volumes.map(v => `<div class="acc-row"><div class="ar-h"><b>${esc(v.path)}</b><span class="small muted">свободно ${fmtBytes(v.free)} из ${fmtBytes(v.total)}</span></div>${meter(v.total - v.free, v.total)}</div>`).join('')
     : `<div class="small muted">Тома NAS не определены. Укажите папки в «Настройки → Папки NAS».</div>`;
-  el.innerHTML = pageHead('Обзор', 'Место в облаке и выгрузки', `<button class="btn" data-act="refreshsum">${IC.refresh} Обновить</button>`) + tiles +
+  el.innerHTML = pageHead('Обзор', 'Место в облаке и выгрузки', `<button class="btn" data-act="refreshsum">${IC.refresh} Обновить</button>`) + banner + tiles +
     `<div class="grid-ov"><div class="card"><h3 class="ct">Аккаунты</h3><div class="ov-acc">${donut}<div class="grow">${accs}</div></div></div>
       <div class="card"><h3 class="ct">Выгрузки по дням</h3>${chart}<div class="small muted legend"><i></i> успешно <i class="f"></i> с ошибками · заданий: ${d.jobs.count}, включено: ${d.jobs.enabled}</div></div>
       <div class="card"><h3 class="ct">Тома NAS</h3>${vols}</div></div>`;
@@ -482,6 +484,7 @@ async function viewSettings(el) {
         <textarea id="s-roots" placeholder="пусто — все общие папки">${esc((st.localRoots || []).join('\n'))}</textarea></div>
       <div class="fi">${label('Временная папка для частей архивов', 'Здесь одновременно лежит одна часть архива (или весь архив, если не разбивать). Нужно свободное место и права записи у пользователя пакета.', 's-tmp')}
         <input type="text" id="s-tmp" value="${esc(st.tmpDir)}" placeholder="по умолчанию — внутри папки данных пакета"></div>
+      <div class="fi"><label class="chk"><input type="checkbox" id="s-upd" ${st.updateCheck ? 'checked' : ''}> Проверять новые версии на GitHub раз в сутки ${tip('Запрос уходит на api.github.com: GitHub увидит IP NAS и версию пакета. Установку вы делаете сами через Центр пакетов. Выключено по умолчанию.')}</label></div>
       <div class="fi"><label class="chk"><input type="checkbox" id="s-tele" ${st.telemetry ? 'checked' : ''}> Отправлять разработчику обезличенные отчёты об ошибках ${tip('Отправляется только текст ошибки без путей, имён файлов, адресов и токенов, а также версия пакета и архитектура. Отключено по умолчанию.')}</label></div>
       <div id="s-msg"></div><p><button class="btn primary" type="submit">Сохранить</button></p></form>` +
     (S.auth === 'dsm' ? `<div class="card">${alertBox('info', 'Вход выполняется через вашу учётную запись DSM', 'Отдельный пароль интерфейса не используется.')}</div>` :
@@ -681,7 +684,7 @@ document.addEventListener('submit', async e => {
     else if (kind === 'acc') {
       const id = f.dataset.id; try { await saveGlobals(); await api(id ? 'PUT' : 'POST', '/api/accounts' + (id ? '/' + id : ''), accBody()); closeModals(); showView(); toast('Аккаунт сохранён', 'success'); } catch (err) { msg($('#a-msg'), err.message); }
     } else if (kind === 'settings') {
-      try { const g = {}; f.querySelectorAll('[data-gkey]').forEach(i => g[i.dataset.gkey] = i.value); const r = await api('PUT', '/api/settings', {tmpDir: $('#s-tmp').value, globals: g, localRoots: $('#s-roots').value.split('\n'), telemetry: $('#s-tele').checked}); S.telemetry = $('#s-tele').checked; S.globals = r.globals || {}; msg($('#s-msg'), 'Сохранено', 'success'); } catch (err) { msg($('#s-msg'), err.message); }
+      try { const g = {}; f.querySelectorAll('[data-gkey]').forEach(i => g[i.dataset.gkey] = i.value); const r = await api('PUT', '/api/settings', {tmpDir: $('#s-tmp').value, globals: g, localRoots: $('#s-roots').value.split('\n'), telemetry: $('#s-tele').checked, updateCheck: $('#s-upd').checked}); S.telemetry = $('#s-tele').checked; S.globals = r.globals || {}; msg($('#s-msg'), 'Сохранено', 'success'); } catch (err) { msg($('#s-msg'), err.message); }
     } else if (kind === 'password') {
       try { await api('POST', '/api/password', {old: $('#p-old').value, new: $('#p-new').value}); msg($('#p-msg'), 'Пароль изменён', 'success'); f.reset(); } catch (err) { msg($('#p-msg'), err.message); }
     }

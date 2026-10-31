@@ -59,6 +59,7 @@ type Server struct {
 	X        *explorer.Manager
 	qc       *quotaCache
 	caches   sync.Map // provider.Provider → *cache.FS (кэш списков для проводника)
+	upd      updCache
 }
 
 // New создаёт сервер и регистрирует маршруты.
@@ -116,6 +117,7 @@ func New(d Deps) *Server {
 	s.mux.HandleFunc("HEAD /api/x/file", s.authed(s.xDownload))
 	s.mux.HandleFunc("PUT /api/x/file", s.authed(s.xUpload))
 	s.mux.HandleFunc("GET /api/settings", s.authed(s.getSettings))
+	s.mux.HandleFunc("GET /api/update", s.authed(s.update))
 	s.mux.HandleFunc("PUT /api/settings", s.authed(s.putSettings))
 	s.mux.HandleFunc("POST /api/password", s.authed(s.changePassword))
 	s.mux.HandleFunc("GET /api/gateway", s.authed(s.gatewayInfo))
@@ -809,10 +811,11 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		TmpDir     *string           `json:"tmpDir"`
-		Globals    map[string]string `json:"globals"`
-		LocalRoots *[]string         `json:"localRoots"`
-		Telemetry  *bool             `json:"telemetry"`
+		TmpDir      *string           `json:"tmpDir"`
+		Globals     map[string]string `json:"globals"`
+		LocalRoots  *[]string         `json:"localRoots"`
+		Telemetry   *bool             `json:"telemetry"`
+		UpdateCheck *bool             `json:"updateCheck"`
 	}
 	if err := readJSON(r, &in); err != nil {
 		jerr(w, 400, "%v", err)
@@ -875,6 +878,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Telemetry != nil {
 		cur.Telemetry = in.Telemetry
+	}
+	if in.UpdateCheck != nil {
+		cur.UpdateCheck = *in.UpdateCheck
+		s.upd.mu.Lock()
+		s.upd.at = time.Time{} // новая настройка — сразу новая проверка
+		s.upd.mu.Unlock()
 	}
 	if err := s.Store.Update(func(c *store.Config) error { c.Settings = cur; return nil }); err != nil {
 		jerr(w, 500, "%v", err)

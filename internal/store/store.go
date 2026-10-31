@@ -52,6 +52,8 @@ type Job struct {
 // Settings — общие настройки.
 type Settings struct {
 	TmpDir string `json:"tmpDir"` // пусто — <data>/tmp
+	// UpdateCheck — проверять новые версии на GitHub (по умолчанию выключено).
+	UpdateCheck bool `json:"updateCheck,omitempty"`
 	// Globals — общие для всех аккаунтов поля (например, ID приложения Яндекса).
 	Globals map[string]string `json:"globals,omitempty"`
 	// LocalRoots — папки NAS, доступные в проводнике. Пусто — общие папки томов /volume*/ .

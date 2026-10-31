@@ -1,0 +1,41 @@
+name: release
+
+# Релиз создаётся при пуше тега vX.Y.Z: собираются оба SPK, подписываются и публикуются.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Тесты
+        run: go test -race ./...
+      - name: Ключ подписи во временный файл
+        env:
+          SIGN_KEY: ${{ secrets.UPDATE_SIGN_KEY }}
+        run: |
+          printf '%s\n' "$SIGN_KEY" >"$RUNNER_TEMP/sign.key"
+          chmod 600 "$RUNNER_TEMP/sign.key"
+          echo "UPDATE_SIGN_KEY=$RUNNER_TEMP/sign.key" >>"$GITHUB_ENV"
+      - name: Сборка и подпись
+        env:
+          UPDATE_REPO: ${{ github.repository }}
+          UPDATE_PUBKEY: ${{ vars.UPDATE_PUBKEY }}
+        run: packaging/build.sh "${GITHUB_REF_NAME#v}"
+      - name: Публикация релиза
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.spk dist/SHA256SUMS dist/SHA256SUMS.sig \
+            --title "$GITHUB_REF_NAME" --generate-notes
+      - name: Удалить ключ
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sign.key"

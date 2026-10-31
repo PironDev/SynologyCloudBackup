@@ -53,7 +53,7 @@ subst() { # subst <файл> <бренд>
 build_arch() { # build_arch <бренд> <goarch> <goarm|""> <суффикс> <куда>
 	local b="$1" goarch="$2" goarm="$3" suffix="$4" dest="$5"
 	CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" GOARM="$goarm" go build -trimpath \
-		-ldflags "-s -w -X nascloud/internal/version.Version=$VER" \
+		-ldflags "-s -w -X nascloud/internal/version.Version=$VER -X nascloud/internal/version.Repo=${UPDATE_REPO:-} -X nascloud/internal/version.PubKey=${UPDATE_PUBKEY:-} -X nascloud/internal/version.Pkg=${B[$b.pkg]}" \
 		-o "$dest/${B[$b.bin]}-$suffix" "./cmd/${B[$b.cmd]}"
 }
 
@@ -208,3 +208,10 @@ EOF
 		INFO PACKAGE_ICON.PNG PACKAGE_ICON_256.PNG package.tgz conf scripts
 	echo "    $spk ($(du -h "$spk" | cut -f1))"
 done
+
+# Подпись релиза для проверки обновлений: SHA256SUMS и SHA256SUMS.sig (нужен UPDATE_SIGN_KEY).
+if [ -n "${UPDATE_SIGN_KEY:-}" ]; then
+	(cd "$DIST" && shasum -a 256 ./*.spk | sed 's|\./||' >SHA256SUMS) &&
+		go run ./packaging/tools/sign sign "$UPDATE_SIGN_KEY" "$DIST/SHA256SUMS" &&
+		echo "подпись: $DIST/SHA256SUMS.sig"
+fi
