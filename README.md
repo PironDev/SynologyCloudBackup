@@ -127,12 +127,21 @@ WEB_ADDR=":8765"               # необязательно: прямой инт
 
 ## Сборка из исходников
 
+Исходный код находится в приватном сабмодуле `app/` (нужен доступ к репозиторию исходников). Все команды ниже выполняются из каталога `app/`.
+
+```sh
+git clone --recurse-submodules git@github.com:PironDev/SynologyCloudBackup.git
+cd SynologyCloudBackup/app
+```
+
 Иконки пакетов генерируются автоматически. Свои файлы `icon_{16,24,32,48,64,72,256}.png` можно положить в `packaging/icons/cloudbackup/` — они заменят сгенерированные.
 
 ```sh
 packaging/build.sh 1.0.0            # пакет → dist/CloudBackup-1.0.0.spk
 go test -race ./...
 ```
+
+CI (`.github/workflows`) загружает сабмодуль с помощью секрета `SUBMODULE_TOKEN` — fine-grained токен с правом **Contents: Read-only** только на репозиторий исходников.
 
 `UI_MODE=tab packaging/build.sh` — запасная сборка с отдельной вкладкой вместо окна DSM.
 
