@@ -42,7 +42,6 @@ const cookieName = "cb_sid"
 // Deps — зависимости сервера.
 type Deps struct {
 	Title       string
-	Desc        provider.Descriptor
 	Store       *store.Store
 	Mgr         *engine.Manager
 	Pool        *engine.Pool
@@ -224,8 +223,7 @@ func gatewayPort(addr string) string {
 
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
-		"title": s.Title, "kind": s.Desc.Kind, "provider": s.Desc.Title, "version": s.Version,
-		"fields": s.Desc.Fields, "help": s.Desc.Help, "steps": s.Desc.Steps, "authUrl": s.Desc.AuthURL, "globals": s.Store.Get().Settings.Globals, "runUser": runUser(), "telemetry": s.Store.Get().Settings.Telemetry,
+		"title": s.Title, "version": s.Version, "providers": s.Pool.Descs(), "globals": s.Store.Get().Settings.Globals, "runUser": runUser(), "telemetry": s.Store.Get().Settings.Telemetry,
 		"needSetup":       proxyOf(r) == nil && s.Store.Get().PasswordHash == "",
 		"loggedIn":        s.loggedIn(r),
 		"auth":            authMode(r),
@@ -342,14 +340,16 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 type accountOut struct {
 	ID     string            `json:"id"`
 	Name   string            `json:"name"`
+	Kind   string            `json:"kind"`
 	Slug   string            `json:"slug"`
 	Fields map[string]string `json:"fields"`
 	Set    map[string]bool   `json:"set"` // какие секретные поля заполнены
 }
 
 func (s *Server) accountDTO(a store.Account) accountOut {
-	out := accountOut{ID: a.ID, Name: a.Name, Slug: a.Slug, Fields: map[string]string{}, Set: map[string]bool{}}
-	for _, f := range s.Desc.Fields {
+	out := accountOut{ID: a.ID, Name: a.Name, Kind: a.Kind, Slug: a.Slug, Fields: map[string]string{}, Set: map[string]bool{}}
+	d, _ := s.Pool.Desc(a.Kind)
+	for _, f := range d.Fields {
 		if f.Secret {
 			out.Set[f.Key] = a.Fields[f.Key] != ""
 		} else {
@@ -410,14 +410,15 @@ func uniqueSlug(c store.Config, want, selfID string) string {
 
 type accountIn struct {
 	Name   string            `json:"name"`
+	Kind   string            `json:"kind"`
 	Slug   string            `json:"slug"`
 	Fields map[string]string `json:"fields"`
 }
 
 // mergeFields сохраняет прежние значения секретных полей, если пришли пустыми.
-func (s *Server) mergeFields(old map[string]string, in map[string]string) map[string]string {
+func mergeFields(d provider.Descriptor, old map[string]string, in map[string]string) map[string]string {
 	out := map[string]string{}
-	for _, f := range s.Desc.Fields {
+	for _, f := range d.Fields {
 		if f.Global {
 			continue // общие поля хранятся в настройках, не в аккаунте
 		}
@@ -465,8 +466,16 @@ func (s *Server) saveAccount(w http.ResponseWriter, r *http.Request) {
 		if idx >= 0 {
 			old = c.Accounts[idx]
 		}
-		fields := s.mergeFields(old.Fields, in.Fields)
-		if _, err := s.Pool.New(fields); err != nil {
+		kind := old.Kind
+		if idx < 0 {
+			kind = in.Kind
+		}
+		d, err := s.Pool.Desc(kind)
+		if err != nil {
+			return err
+		}
+		fields := mergeFields(d, old.Fields, in.Fields)
+		if _, err := d.New(fields); err != nil {
 			return err
 		}
 		slug := in.Slug
@@ -482,7 +491,7 @@ func (s *Server) saveAccount(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		slug = uniqueSlug(*c, slug, old.ID)
-		saved = store.Account{ID: old.ID, Name: in.Name, Slug: slug, Fields: fields}
+		saved = store.Account{ID: old.ID, Name: in.Name, Kind: d.Kind, Slug: slug, Fields: fields}
 		if idx >= 0 {
 			c.Accounts[idx] = saved
 		} else {
@@ -524,6 +533,7 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 func (s *Server) testAccount(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		ID     string            `json:"id"`
+		Kind   string            `json:"kind"`
 		Fields map[string]string `json:"fields"`
 	}
 	if err := readJSON(r, &in); err != nil {
@@ -531,10 +541,17 @@ func (s *Server) testAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var old store.Account
+	kind := in.Kind
 	if in.ID != "" {
 		old, _ = s.Store.Get().Account(in.ID)
+		kind = old.Kind
 	}
-	prov, err := s.Pool.New(s.mergeFields(old.Fields, in.Fields))
+	d, err := s.Pool.Desc(kind)
+	if err != nil {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	prov, err := d.New(mergeFields(d, old.Fields, in.Fields))
 	if err != nil {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -780,7 +797,9 @@ func (s *Server) browseFS(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, err := os.ReadDir(p)
 	if err != nil {
-		jerr(w, 400, "нет доступа к %s: %v (выдайте пользователю пакета право чтения на общую папку)", p, err)
+		jerr(w, 400, "нет доступа к %s: %v. Выдайте пакету право чтения. Права на общую папку есть не у всех вложенных папок: "+
+			"у личных папок в homes часто свои права. Откройте File Station, нажмите на папку правой кнопкой → Свойства → Разрешение → Создать, "+
+			"выберите системного внутреннего пользователя пакета и «Применить к: эта папка, вложенные папки и файлы»", p, err)
 		return
 	}
 	type dir struct {
@@ -839,9 +858,11 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Globals != nil {
 		allowed := map[string]bool{}
-		for _, f := range s.Desc.Fields {
-			if f.Global {
-				allowed[f.Key] = true
+		for _, d := range s.Pool.Descs() {
+			for _, f := range d.Fields {
+				if f.Global {
+					allowed[f.Key] = true
+				}
 			}
 		}
 		g := map[string]string{}
@@ -965,8 +986,35 @@ func (s *Server) ProxyHandler(secret string) http.Handler {
 			return
 		}
 		p := &proxyInfo{user: r.Header.Get("X-DSM-User"), base: r.Header.Get("X-Api-Base"), reason: r.Header.Get("X-DSM-Reason")}
-		inner.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxProxy, p)))
+		inner.ServeHTTP(&dsmSafeWriter{ResponseWriter: w}, r.WithContext(context.WithValue(r.Context(), ctxProxy, p)))
 	})
+}
+
+// dsmIntercepts — коды, которые веб-сервер DSM заменяет своей страницей ошибки
+// («Извините, искомая вами страница не найдена»). Текст ошибки тогда до интерфейса не доходит.
+var dsmIntercepts = map[int]bool{401: true, 403: true, 404: true, 500: true, 502: true, 503: true, 504: true}
+
+// dsmSafeWriter отдаёт такие коды мосту как 422, исходный код — в заголовке X-Cloud-Status.
+// Нужен только за CGI-мостом: прямой интерфейс (WEB_ADDR) получает коды как есть.
+type dsmSafeWriter struct {
+	http.ResponseWriter
+}
+
+func (w *dsmSafeWriter) WriteHeader(code int) {
+	if dsmIntercepts[code] {
+		w.Header().Set("X-Cloud-Status", strconv.Itoa(code))
+		code = http.StatusUnprocessableEntity
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// Unwrap нужен http.ResponseController (Flush при потоковой выдаче файлов).
+func (w *dsmSafeWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *dsmSafeWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 var baseRe = regexp.MustCompile(`^[A-Za-z0-9_./?=%-]{0,128}$`)

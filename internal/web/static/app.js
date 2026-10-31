@@ -153,13 +153,16 @@ async function api(method, url, body) {
 
 // ---------- каркас ----------
 async function loadState() { await ensureToken(); S = await api('GET', '/api/state'); render(); }
+// Все провайдеры пакета, поля и выбор описания по виду аккаунта.
+const providerOf = kind => S.providers.find(p => p.kind === kind) || S.providers[0];
+const allFields = () => S.providers.flatMap(p => p.fields);
 
 const TABS = [['overview', 'Обзор'], ['explorer', 'Проводник'], ['jobs', 'Задания'], ['accounts', 'Аккаунты'], ['runs', 'Журнал'], ['gateway', 'File Station'], ['settings', 'Настройки']];
 
 function render() {
   if (!S) { $app.innerHTML = spinner; return; }
   document.title = S.title;
-  document.documentElement.dataset.brand = S.kind || '';
+
   if (S.auth === 'dsm' && !S.loggedIn) return renderDenied();
   if (S.needSetup) return renderAuth(true);
   if (!S.loggedIn) return renderAuth(false);
@@ -363,17 +366,18 @@ async function viewOverview(el, again = false) {
     ${stat('Занято', t.known ? fmtBytes(t.used) : '—', t.known ? usedPct + '% от объёма' : '')}
     ${stat('Свободно', t.known ? fmtBytes(t.free) : '—', t.known ? (100 - usedPct) + '% свободно' : '', t.known && usedPct > 90 ? 'bad' : 'good')}
     ${stat('Выгружено за 14 дней', fmtBytes(d.jobs.bytes), `запусков: ${d.jobs.runsOk} успешно` + (d.jobs.runsFail ? `, <span class="err-text">${d.jobs.runsFail} с ошибками</span>` : ''))}</div>`;
-  const accs = d.accounts.length ? d.accounts.map(a => a.pending ? `<div class="acc-row"><div class="ar-h"><b>${esc(a.name)}</b><span class="tag run"><i class="dot"></i>запрашиваю…</span></div></div>` : `<div class="acc-row"><div class="ar-h"><b>${esc(a.name)}</b>
+  const accs = d.accounts.length ? d.accounts.map(a => a.pending ? `<div class="acc-row"><div class="ar-h"><b>${esc(a.name)}</b> <span class="small muted">${esc(providerOf(a.kind).title)}</span><span class="tag run"><i class="dot"></i>запрашиваю…</span></div></div>` : `<div class="acc-row"><div class="ar-h"><b>${esc(a.name)}</b> <span class="small muted">${esc(providerOf(a.kind).title)}</span>
       ${!a.ok ? `<span class="tag err"><i class="dot"></i>ошибка</span>` : a.total ? `<span class="small muted">${fmtBytes(a.used)} из ${fmtBytes(a.total)}</span>` : '<span class="tag muted">объём не сообщается</span>'}</div>
       ${!a.ok ? `<div class="small err-text">${esc(a.error)}</div>` : a.total ? meter(a.used, a.total) + `<div class="small muted">свободно ${fmtBytes(a.free)} · занято ${Math.round(a.used / a.total * 100)}%</div>` : `<div class="small muted">${esc(a.title || 'подключено')}</div>`}</div>`).join('')
     : empty('Аккаунтов пока нет', `<button class="btn primary" data-act="newacc">${IC.plus} Добавить аккаунт</button>`);
+  const perProv = S.providers.length > 1 ? `<div class="stats">${S.providers.map(p => { const xs = d.accounts.filter(a => a.kind === p.kind), tot = xs.reduce((s, a) => s + (a.total || 0), 0), used = xs.reduce((s, a) => s + (a.used || 0), 0); return stat(p.title, 'аккаунтов: ' + xs.length, tot ? `занято ${fmtBytes(used)} из ${fmtBytes(tot)}` : 'объём не сообщается'); }).join('')}</div>` : '';
   const donut = t.known ? `<div class="donut" style="--p:${usedPct}"><div class="dn"><b>${usedPct}%</b><span>занято</span></div></div>` : '';
   const max = Math.max(1, ...d.days.map(x => x.bytes));
   const chart = `<div class="bars">${d.days.map(x => `<div class="bar-c" data-tip="${shortDate(x.date)}: ${fmtBytes(x.bytes)}, файлов ${x.files}${x.fail ? ', ошибок: ' + x.fail : ''}">
       <div class="bar-v"><i class="${x.fail ? 'f' : ''}" style="height:${Math.max(x.bytes / max * 100, x.bytes ? 4 : 0).toFixed(1)}%"></i></div><span>${shortDate(x.date)}</span></div>`).join('')}</div>`;
   const vols = d.volumes.length ? d.volumes.map(v => `<div class="acc-row"><div class="ar-h"><b>${esc(v.path)}</b><span class="small muted">свободно ${fmtBytes(v.free)} из ${fmtBytes(v.total)}</span></div>${meter(v.total - v.free, v.total)}</div>`).join('')
     : `<div class="small muted">Тома NAS не определены. Укажите папки в «Настройки → Папки NAS».</div>`;
-  el.innerHTML = pageHead('Обзор', 'Место в облаке и выгрузки', `<button class="btn" data-act="refreshsum">${IC.refresh} Обновить</button>`) + banner + tiles +
+  el.innerHTML = pageHead('Обзор', 'Место в облаке и выгрузки', `<button class="btn" data-act="refreshsum">${IC.refresh} Обновить</button>`) + banner + tiles + perProv +
     `<div class="grid-ov"><div class="card"><h3 class="ct">Аккаунты</h3><div class="ov-acc">${donut}<div class="grow">${accs}</div></div></div>
       <div class="card"><h3 class="ct">Выгрузки по дням</h3>${chart}<div class="small muted legend"><i></i> успешно <i class="f"></i> с ошибками · заданий: ${d.jobs.count}, включено: ${d.jobs.enabled}</div></div>
       <div class="card"><h3 class="ct">Тома NAS</h3>${vols}</div></div>`;
@@ -382,9 +386,9 @@ async function viewOverview(el, again = false) {
 // ---------- аккаунты ----------
 async function viewAccounts(el) {
   accounts = await api('GET', '/api/accounts');
-  el.innerHTML = pageHead('Аккаунты', S.provider, `<button class="btn primary" data-act="newacc">${IC.plus} Добавить аккаунт</button>`) +
+  el.innerHTML = pageHead('Аккаунты', S.providers.map(p => p.title).join(' · '), `<button class="btn primary" data-act="newacc">${IC.plus} Добавить аккаунт</button>`) +
     (accounts.length ? `<div class="card flush"><div class="tw"><table><thead><tr><th>Название</th><th>Адрес в шлюзе</th><th>Подключение</th><th></th></tr></thead><tbody>${accounts.map(a => `<tr><td><b>${esc(a.name)}</b>
-      <div class="small muted">${S.fields.filter(f => !f.secret && !f.global && !['user_agent', 'split_mb'].includes(f.key) && a.fields[f.key]).map(f => esc(f.options ? ((f.options.find(o => o.value === a.fields[f.key]) || {}).label || a.fields[f.key]) : a.fields[f.key])).join(' · ')}${a.set && a.set.enc_password ? ' · 🔒 шифрование' : ''}${a.fields.split_mb && a.fields.split_mb !== '0' ? ' · части по ' + esc(a.fields.split_mb) + ' МБ' : ''}</div></td><td><code>/${esc(a.slug)}/</code></td>
+      <div class="small muted">${esc(providerOf(a.kind).title)} · ${providerOf(a.kind).fields.filter(f => !f.secret && !f.global && !['user_agent', 'split_mb'].includes(f.key) && a.fields[f.key]).map(f => esc(f.options ? ((f.options.find(o => o.value === a.fields[f.key]) || {}).label || a.fields[f.key]) : a.fields[f.key])).join(' · ')}${a.set && a.set.enc_password ? ' · 🔒 шифрование' : ''}${a.fields.split_mb && a.fields.split_mb !== '0' ? ' · части по ' + esc(a.fields.split_mb) + ' МБ' : ''}</div></td><td><code>/${esc(a.slug)}/</code></td>
       <td><span id="t-${a.id}" class="small muted">не проверялось</span></td>
       <td class="act"><button class="btn sm" data-act="testsaved" data-id="${a.id}">${IC.check} Проверить</button>
       <button class="btn sm icon" data-tip="Изменить" aria-label="Изменить" data-act="editacc" data-id="${a.id}">${IC.edit}</button>
@@ -397,28 +401,28 @@ async function viewAccounts(el) {
     c.className = 'small'; c.innerHTML = a.total ? `${meter(a.used, a.total)}<div class="muted">занято ${fmtBytes(a.used)} из ${fmtBytes(a.total)} · свободно ${fmtBytes(a.free)}</div>` : '<span class="ok-text">подключено</span> <span class="muted">· объём не сообщается</span>';
   })).catch(() => {});
 }
-function howTo() {
-  const body = (S.steps && S.steps.length) ? timeline(S.steps) : `<p class="small">${linkify(S.help)}</p>`;
-  return body;
-}
+function howTo(p) { return (p.steps && p.steps.length) ? timeline(p.steps) : `<p class="small">${linkify(p.help)}</p>`; }
+const accFields = (p, a) => p.fields.map(f => f.options ? `<div class="fi">${label(f.label, f.help, 'a-' + f.key)}<select id="a-${f.key}">${f.options.map(o => `<option value="${esc(o.value)}" ${(a.fields[f.key] || f.default) === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select></div>` : `<div class="fi">${label(f.label, f.help, 'a-' + f.key)}<input type="${f.secret ? 'password' : 'text'}" id="a-${f.key}" autocomplete="off"
+      value="${f.secret ? '' : esc(f.global ? ((S.globals || {})[f.key] || '') : (a.fields[f.key] || ''))}" placeholder="${f.secret && a.set[f.key] ? 'сохранено — оставьте пустым, чтобы не менять' : esc(f.placeholder || '')}"></div>`).join('') + (p.authUrl ? `<div class="fi"><button class="btn" type="button" data-act="gettoken">${IC.link || ''} Получить токен</button></div>` : '');
 function openAccForm(acc) {
-  const a = acc || {name:'', slug:'', fields:{}, set:{}};
+  const a = acc || {name:'', slug:'', kind: S.providers[0].kind, fields:{}, set:{}};
+  const p = providerOf(a.kind);
+  const pick = !acc && S.providers.length > 1 ? `<div class="fi">${label('Облако', 'Вид аккаунта выбирается один раз и потом не меняется.', 'a-kind')}<select id="a-kind">${S.providers.map(x => `<option value="${x.kind}">${esc(x.title)}</option>`).join('')}</select></div>` : '';
   modal(`<h3>${acc ? 'Изменить аккаунт' : 'Новый аккаунт'}</h3>
-    <details class="collapse" ${acc ? '' : 'open'}><summary>Как получить данные для подключения</summary>${howTo()}</details>
-    <form data-form="acc" data-id="${acc ? acc.id : ''}">
+    <details class="collapse" ${acc ? '' : 'open'}><summary>Как получить данные для подключения</summary><div id="a-how">${howTo(p)}</div></details>
+    <form data-form="acc" data-id="${acc ? acc.id : ''}" data-kind="${a.kind}">
+    ${pick}
     <div class="fi">${label('Название (для вас)', '', 'a-name')}<input type="text" id="a-name" value="${esc(a.name)}" placeholder="Например: личный"></div>
-    ${S.fields.map(f => f.options ? `<div class="fi">${label(f.label, f.help, 'a-' + f.key)}<select id="a-${f.key}">${f.options.map(o => `<option value="${esc(o.value)}" ${(a.fields[f.key] || f.default) === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select></div>` : `<div class="fi">${label(f.label, f.help, 'a-' + f.key)}<input type="${f.secret ? 'password' : 'text'}" id="a-${f.key}" autocomplete="off"
-      value="${f.secret ? '' : esc(f.global ? ((S.globals || {})[f.key] || '') : (a.fields[f.key] || ''))}" placeholder="${f.secret && a.set[f.key] ? 'сохранено — оставьте пустым, чтобы не менять' : esc(f.placeholder || '')}"></div>`).join('')}
-    ${S.authUrl ? `<div class="fi"><button class="btn" type="button" data-act="gettoken">${IC.link || ''} Получить токен</button></div>` : ''}
+    <div id="a-fields">${accFields(p, a)}</div>
     <div class="fi">${label('Адрес в WebDAV-шлюзе', 'Латиницей. Короткое имя аккаунта в адресе для File Station. Создаётся автоматически, если оставить пустым.', 'a-slug')}<input type="text" id="a-slug" value="${esc(a.slug)}" placeholder="создаётся автоматически"></div>
     <div id="a-msg"></div>
     <div class="foot"><button class="btn" type="button" data-act="closemodal">Отмена</button><button class="btn" type="button" data-act="testform">Проверить подключение</button><button class="btn primary" type="submit">Сохранить</button></div></form>`);
 }
-const accBody = () => ({name: $('#a-name').value, slug: $('#a-slug').value, fields: Object.fromEntries(S.fields.filter(f => !f.global).map(f => [f.key, $('#a-' + f.key).value]))});
+const accBody = () => { const p = providerOf($('form[data-form=acc]').dataset.kind); return {name: $('#a-name').value, slug: $('#a-slug').value, kind: p.kind, fields: Object.fromEntries(p.fields.filter(f => !f.global).map(f => [f.key, $('#a-' + f.key).value]))}; };
 // Общие поля (ID приложения Яндекса) хранятся один раз в настройках и подставляются во все аккаунты.
 async function saveGlobals() {
   const g = {}; let changed = false;
-  S.fields.filter(f => f.global).forEach(f => { const v = ($('#a-' + f.key) || {value: (S.globals || {})[f.key] || ''}).value.trim(); g[f.key] = v; if (v !== ((S.globals || {})[f.key] || '')) changed = true; });
+  allFields().filter(f => f.global).forEach(f => { const v = ($('#a-' + f.key) || {value: (S.globals || {})[f.key] || ''}).value.trim(); g[f.key] = v; if (v !== ((S.globals || {})[f.key] || '')) changed = true; });
   if (!changed) return;
   const r = await api('PUT', '/api/settings', {globals: g}); S.globals = r.globals || {};
 }
@@ -476,7 +480,7 @@ async function viewGateway(el) {
 }
 async function viewSettings(el) {
   const st = await api('GET', '/api/settings');
-  const globals = S.fields.filter(f => f.global);
+  const globals = allFields().filter(f => f.global);
   el.innerHTML = pageHead('Настройки') +
     `<form class="card" data-form="settings">
       ${globals.map(f => `<div class="fi">${label(f.label, f.help, 's-g-' + f.key)}<input type="text" id="s-g-${f.key}" data-gkey="${f.key}" value="${esc((st.globals || {})[f.key] || '')}" placeholder="${esc(f.placeholder || '')}"></div>`).join('')}
@@ -509,7 +513,7 @@ function wizSteps() {
       <ul class="wiz-list"><li><b>Обзор</b> — сколько места занято и свободно в каждом облаке, статистика выгрузок.</li><li><b>Проводник</b> — две панели: NAS и облако, перетаскивание файлов, копирование и перенос.</li>
       <li><b>Задания</b> — автоматические выгрузки по расписанию (зеркало или архив).</li><li><b>Аккаунты</b> — подключённые облака, можно несколько.</li><li><b>File Station</b> — облако в проводнике DSM.</li></ul>
       <p class="muted small">Мастер займёт минуту. Открыть его снова можно кнопкой «?» в шапке.</p>`},
-    {t: 'Подключите аккаунт', html: `<p>Сначала подключите облако (${esc(S.provider)}).</p>${(S.steps && S.steps.length) ? timeline(S.steps) : `<p class="small">${linkify(S.help)}</p>`}
+    {t: 'Подключите аккаунт', html: `<p>Сначала подключите облако: ${S.providers.map(p => esc(p.title)).join(', ')}.</p>${S.providers.map(p => `<h4>${esc(p.title)}</h4>${howTo(p)}`).join('')}
       <p class="muted small">Аккаунтов может быть несколько — для каждого своя запись.</p>`, action: ['wizadd', 'Добавить аккаунт сейчас']},
     {t: 'Права на папки NAS', html: `<p>Пакет работает от отдельного пользователя DSM: <code>${esc(user)}</code>. Пока вы не дадите ему права, он не увидит ваши файлы и не сможет ничего записать.</p>
       ${timeline([
@@ -624,7 +628,7 @@ const H = {
   pickhere(t) { const p = t.closest('.overlay'), o = jobFormModal(); if (p._cur) { o._sources.push(p._cur); drawSources(o); } p.remove(); },
   newacc() { openAccForm(null); },
   async gettoken() {
-    const m = $('#a-msg'), url = S.authUrl.replace(/\{(\w+)\}/g, (_, k) => encodeURIComponent((($('#a-' + k) || {}).value || '').trim()));
+    const m = $('#a-msg'), url = providerOf($('form[data-form=acc]').dataset.kind).authUrl.replace(/\{(\w+)\}/g, (_, k) => encodeURIComponent((($('#a-' + k) || {}).value || '').trim()));
     if (/=(&|$)/.test(url)) return msg(m, 'Сначала впишите ID приложения', 'error');
     window.open(url, '_blank', 'noopener');
     msg(m, 'Откроется страница Яндекса. Разрешите доступ, скопируйте токен и вставьте в поле «OAuth-токен». ID приложения сохранён для всех аккаунтов.', 'info');
@@ -649,7 +653,7 @@ const H = {
   wizadd() { wizFinish(); view = 'accounts'; render(); setTimeout(() => openAccForm(null), 250); },
   async refreshsum() { forceSum = true; showView(); },
   async testform() { const m = $('#a-msg'); msg(m, 'Проверяю…', 'info'); const id = $('form[data-form=acc]').dataset.id;
-    try { const r = await api('POST', '/api/accounts/test', {id, fields: accBody().fields}); r.ok ? msg(m, infoText(r.info), 'success') : msg(m, r.error); } catch (e) { msg(m, e.message); } },
+    try { const b = accBody(); const r = await api('POST', '/api/accounts/test', {id, kind: b.kind, fields: b.fields}); r.ok ? msg(m, infoText(r.info), 'success') : msg(m, r.error); } catch (e) { msg(m, e.message); } },
   async openrun(t) { const r = t.querySelectorAll('td')[1].textContent; openRun(t.dataset.id, r); },
   gwshow(t) { const i = $('#gwpw'); i.type = i.type === 'password' ? 'text' : 'password'; t.innerHTML = i.type === 'password' ? IC.eye + ' Показать' : IC.eye + ' Скрыть'; },
   async gwregen() { if (await askConfirm('Сменить пароль шлюза?', 'Подключения в File Station придётся обновить.', 'Сменить', false)) { await api('POST', '/api/gateway/regenerate', {}); showView(); toast('Пароль шлюза изменён', 'success'); } },
@@ -661,6 +665,7 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'runjob') { runFilter = e.target.value; refreshRuns(); return; }
+  if (e.target.id === 'a-kind') { const p = providerOf(e.target.value); $('form[data-form=acc]').dataset.kind = p.kind; $('#a-fields').innerHTML = accFields(p, {fields: {}, set: {}}); $('#a-how').innerHTML = howTo(p); return; }
   const o = e.target.closest('.overlay'); if (!o) return;
   if (e.target.dataset.tree !== undefined) { treeToggle(o, e.target.dataset.tree, e.target.checked); return; }
   if (e.target.id === 'f-preset') {

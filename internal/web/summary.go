@@ -54,6 +54,7 @@ func (s *Server) kick(id string) {
 type accSummary struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
+	Kind  string `json:"kind"`
 	Slug  string `json:"slug"`
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
@@ -73,7 +74,7 @@ func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
 	accs := make([]accSummary, len(cfg.Accounts))
 	for i, a := range cfg.Accounts {
 		o := &accs[i]
-		*o = accSummary{ID: a.ID, Name: a.Name, Slug: a.Slug}
+		*o = accSummary{ID: a.ID, Name: a.Name, Kind: a.Kind, Slug: a.Slug}
 		s.qc.mu.Lock()
 		e, have := s.qc.m[a.ID]
 		busy := s.qc.running[a.ID]

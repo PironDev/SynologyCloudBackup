@@ -118,7 +118,7 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { mgr.Shutdown(5 * time.Second) })
-	srv := web.New(web.Deps{Title: "Тест", Desc: desc, Store: st, Mgr: mgr, Pool: pool, GatewayAddr: "127.0.0.1:8766", Version: "test"})
+	srv := web.New(web.Deps{Title: "Тест", Store: st, Mgr: mgr, Pool: pool, GatewayAddr: "127.0.0.1:8766", Version: "test"})
 
 	const sec = "s3cret"
 	proxy := httptest.NewServer(srv.ProxyHandler(sec))
@@ -215,11 +215,12 @@ func TestCGIEndToEnd(t *testing.T) {
 	if st["loggedIn"] != false || !strings.Contains(st["reason"].(string), "не входит в группу администраторов") {
 		t.Fatalf("состояние не администратора: %v", st)
 	}
-	if res := r.call(t, "GET", "r=%2Fapi%2Fjobs", "id=user", csrf, ""); res.status != 401 {
+	// Отказ за мостом приходит как 422 с текстом: код 401 DSM заменил бы своей страницей ошибки.
+	if res := r.call(t, "GET", "r=%2Fapi%2Fjobs", "id=user", csrf, ""); res.status != 422 || !strings.Contains(res.body, `"error"`) {
 		t.Fatalf("API для не администратора: %d", res.status)
 	}
 	// защищённый API без входа и с входом
-	if res := r.call(t, "GET", "r=%2Fapi%2Faccounts", "", csrf, ""); res.status != 401 {
+	if res := r.call(t, "GET", "r=%2Fapi%2Faccounts", "", csrf, ""); res.status != 422 || !strings.Contains(res.body, `"error"`) {
 		t.Fatalf("API без сессии: %d", res.status)
 	}
 	if res := r.call(t, "GET", "r=%2Fapi%2Faccounts", "id=admin", csrf, ""); res.status != 200 {
@@ -228,8 +229,8 @@ func TestCGIEndToEnd(t *testing.T) {
 
 	// запись: нужен CSRF-заголовок, тело и Content-Type доходят до службы
 	acc := `{"name":"Личный","fields":{"token":"T"}}`
-	if res := r.call(t, "POST", "r=%2Fapi%2Faccounts", "id=admin", nil, acc); res.status != 403 {
-		t.Fatalf("без X-Requested-With ожидался 403, получен %d", res.status)
+	if res := r.call(t, "POST", "r=%2Fapi%2Faccounts", "id=admin", nil, acc); res.status != 422 {
+		t.Fatalf("без X-Requested-With ожидался 422 (403 за мостом), получен %d", res.status)
 	}
 	res := r.call(t, "POST", "r=%2Fapi%2Faccounts", "id=admin", csrf, acc)
 	if res.status != 200 && res.status != 201 {
@@ -336,7 +337,7 @@ func TestCGIFileTransfer(t *testing.T) {
 		t.Fatalf("диапазон: %d %q %v", part.status, part.body, part.headers)
 	}
 	// без сессии файл не отдаётся
-	if res := r.call(t, "GET", dl, "id=none", nil, ""); res.status != 401 {
+	if res := r.call(t, "GET", dl, "id=none", nil, ""); res.status != 422 {
 		t.Fatalf("без сессии: %d", res.status)
 	}
 }

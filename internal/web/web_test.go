@@ -44,7 +44,7 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { mgr.Shutdown(5 * time.Second) })
-	s := web.New(web.Deps{Title: "Тест", Desc: desc, Store: st, Mgr: mgr, Pool: pool, GatewayAddr: "127.0.0.1:8766", Version: "test"})
+	s := web.New(web.Deps{Title: "Тест", Store: st, Mgr: mgr, Pool: pool, GatewayAddr: "127.0.0.1:8766", Version: "test"})
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)

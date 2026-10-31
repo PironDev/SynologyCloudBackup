@@ -12,8 +12,7 @@ if shutil.which("rsvg-convert") is None:
     sys.exit("rsvg-convert не найден: brew install librsvg")
 
 for svg in sorted((root / "src").glob("*.svg")):
-    if svg.stem == "logo":
-        continue
+
     out = root / svg.stem
     out.mkdir(exist_ok=True)
     for s in SIZES:

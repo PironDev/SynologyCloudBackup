@@ -18,6 +18,7 @@ import (
 type Account struct {
 	ID     string            `json:"id"`
 	Name   string            `json:"name"`
+	Kind   string            `json:"kind"` // вид провайдера, например yandex или mailru
 	Slug   string            `json:"slug"` // путь аккаунта в WebDAV-шлюзе
 	Fields map[string]string `json:"fields"`
 }

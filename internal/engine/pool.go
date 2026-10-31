@@ -18,9 +18,9 @@ import (
 
 // Pool кэширует драйверы аккаунтов (переиспользует HTTP-соединения).
 type Pool struct {
-	desc provider.Descriptor
-	mu   sync.Mutex
-	m    map[string]poolEntry
+	descs []provider.Descriptor
+	mu    sync.Mutex
+	m     map[string]poolEntry
 }
 
 type poolEntry struct {
@@ -28,10 +28,20 @@ type poolEntry struct {
 	p  provider.Provider
 }
 
-func NewPool(d provider.Descriptor) *Pool { return &Pool{desc: d, m: map[string]poolEntry{}} }
+func NewPool(ds ...provider.Descriptor) *Pool { return &Pool{descs: ds, m: map[string]poolEntry{}} }
 
-// Descriptor возвращает описание вендора.
-func (p *Pool) Descriptor() provider.Descriptor { return p.desc }
+// Desc возвращает описание провайдера по виду аккаунта. Пустой вид допустим, если провайдер один.
+func (p *Pool) Desc(kind string) (provider.Descriptor, error) {
+	for _, d := range p.descs {
+		if d.Kind == kind || (kind == "" && len(p.descs) == 1) {
+			return d, nil
+		}
+	}
+	return provider.Descriptor{}, fmt.Errorf("неизвестный провайдер %q", kind)
+}
+
+// Descs возвращает описания всех провайдеров пакета.
+func (p *Pool) Descs() []provider.Descriptor { return p.descs }
 
 func fingerprint(f map[string]string) string {
 	keys := make([]string, 0, len(f))
@@ -54,7 +64,7 @@ func (p *Pool) Get(a store.Account) (provider.Provider, error) {
 	if e, ok := p.m[a.ID]; ok && e.fp == fp {
 		return e.p, nil
 	}
-	pr, err := p.New(a.Fields)
+	pr, err := p.New(a.Kind, a.Fields)
 	if err != nil {
 		return nil, err
 	}
@@ -63,8 +73,12 @@ func (p *Pool) Get(a store.Account) (provider.Provider, error) {
 }
 
 // New создаёт драйвер без кэширования (проверка подключения из формы).
-func (p *Pool) New(fields map[string]string) (provider.Provider, error) {
-	pr, err := p.desc.New(fields)
+func (p *Pool) New(kind string, fields map[string]string) (provider.Provider, error) {
+	d, err := p.Desc(kind)
+	if err != nil {
+		return nil, err
+	}
+	pr, err := d.New(fields)
 	if err != nil {
 		return nil, err
 	}
@@ -86,4 +100,10 @@ func (p *Pool) New(fields map[string]string) (provider.Provider, error) {
 }
 
 // Raw возвращает драйвер без обёрток (шифрование, нарезка) — для возможностей облака вроде публичных ссылок.
-func (p *Pool) Raw(a store.Account) (provider.Provider, error) { return p.desc.New(a.Fields) }
+func (p *Pool) Raw(a store.Account) (provider.Provider, error) {
+	d, err := p.Desc(a.Kind)
+	if err != nil {
+		return nil, err
+	}
+	return d.New(a.Fields)
+}

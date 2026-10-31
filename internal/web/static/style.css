@@ -12,8 +12,7 @@
   --blob1: rgba(255, 140, 190, .55); --blob2: rgba(120, 170, 255, .55); --blob3: rgba(150, 240, 210, .5);
   --card: var(--glass);
 }
-html[data-brand="yandex"] { --accent: #ff4a2b; --accent-2: #ff9a3c; --accent-glow: rgba(255, 74, 43, .35); --run: #ff4a2b; --run-bg: rgba(255, 90, 50, .15); }
-html[data-brand="mailru"] { --accent: #1b7bff; --accent-2: #3de0ff; --accent-glow: rgba(27, 123, 255, .35); }
+
 
 html[data-theme="dark"] { color-scheme: dark; }
 @media (prefers-color-scheme: dark) { html:not([data-theme="light"]) { color-scheme: dark; } }
@@ -41,11 +40,7 @@ html[data-theme="dark"] {
     --blob1: rgba(255, 60, 140, .20); --blob2: rgba(60, 110, 255, .24); --blob3: rgba(30, 220, 190, .14);
   }
 }
-/* HDR / широкий охват: более насыщенные неоновые акценты там, где экран их умеет */
-@media (color-gamut: p3) {
-  html[data-brand="yandex"] { --accent: color(display-p3 1 .29 .17); --accent-2: color(display-p3 1 .62 .22); }
-  html[data-brand="mailru"] { --accent: color(display-p3 .1 .48 1); --accent-2: color(display-p3 .22 .9 1); }
-}
+
 @media (dynamic-range: high) {
   html[data-theme="dark"] { --accent-glow: color(rec2020 .45 .55 1 / .62); }
 }

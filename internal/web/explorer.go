@@ -122,9 +122,9 @@ func (s *Server) xSources(w http.ResponseWriter, r *http.Request) {
 	roots, auto := s.localRoots()
 	out := []src{{ID: localSrc, Name: "NAS", Kind: "local", Roots: roots}}
 	for _, a := range s.Store.Get().Accounts {
-		out = append(out, src{ID: a.ID, Name: a.Name, Kind: s.Desc.Kind, Share: s.canPublish(a), Trash: s.canTrash(a)})
+		out = append(out, src{ID: a.ID, Name: a.Name, Kind: a.Kind, Share: s.canPublish(a), Trash: s.canTrash(a)})
 	}
-	writeJSON(w, 200, map[string]any{"sources": out, "autoRoots": auto, "provider": s.Desc.Title})
+	writeJSON(w, 200, map[string]any{"sources": out, "autoRoots": auto})
 }
 
 func (s *Server) xList(w http.ResponseWriter, r *http.Request) {

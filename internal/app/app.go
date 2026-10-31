@@ -34,10 +34,10 @@ import (
 type Brand struct {
 	ID          string
 	Title       string
-	Descriptor  provider.Descriptor
-	WebAddr     string // прямой интерфейс с паролем (необязателен), по умолчанию ":8765"
-	GatewayAddr string // по умолчанию "127.0.0.1:8766"
-	ProxyAddr   string // внутренний интерфейс для CGI-моста DSM, по умолчанию "127.0.0.1:8767"
+	Descriptors []provider.Descriptor // провайдеры пакета; вид аккаунта выбирает нужный
+	WebAddr     string                // прямой интерфейс с паролем (необязателен), по умолчанию ":8765"
+	GatewayAddr string                // по умолчанию "127.0.0.1:8766"
+	ProxyAddr   string                // внутренний интерфейс для CGI-моста DSM, по умолчанию "127.0.0.1:8767"
 }
 
 func isLoopback(addr string) bool {
@@ -97,7 +97,11 @@ func run(b Brand, dataDir, webAddr, gwAddr, proxyAddr string) error {
 	if err != nil {
 		return err
 	}
-	st, err := store.Open(dataDir, box, b.Descriptor.SecretKeys())
+	var keys []string
+	for _, d := range b.Descriptors {
+		keys = append(keys, d.SecretKeys()...)
+	}
+	st, err := store.Open(dataDir, box, keys)
 	if err != nil {
 		return err
 	}
@@ -107,7 +111,7 @@ func run(b Brand, dataDir, webAddr, gwAddr, proxyAddr string) error {
 	telemetry.Init(b.ID, version.Version,
 		func() bool { t := st.Get().Settings.Telemetry; return t != nil && *t },
 		func() string { return st.Get().Settings.InstallID })
-	pool := engine.NewPool(b.Descriptor)
+	pool := engine.NewPool(b.Descriptors...)
 	mgr, err := engine.NewManager(st, pool, dataDir)
 	if err != nil {
 		return err
@@ -117,7 +121,7 @@ func run(b Brand, dataDir, webAddr, gwAddr, proxyAddr string) error {
 	defer stop()
 	go mgr.RunScheduler(ctx)
 
-	webSrv := web.New(web.Deps{Title: b.Title, Desc: b.Descriptor, Store: st, Mgr: mgr, Pool: pool, GatewayAddr: gwAddr, Version: version.Version})
+	webSrv := web.New(web.Deps{Title: b.Title, Store: st, Mgr: mgr, Pool: pool, GatewayAddr: gwAddr, Version: version.Version})
 	gw := &gateway.Server{Store: st, Pool: pool, TmpDir: mgr.TmpDir}
 
 	servers := []*http.Server{{Addr: gwAddr, Handler: gw, ReadHeaderTimeout: 15 * time.Second}}
